@@ -1,16 +1,18 @@
 import { useState } from "react";
-import { Heart, Play } from "lucide-react";
+import { Heart, Play, Clock } from "lucide-react";
 import { type PlaylistItem } from "@/lib/m3u-parser";
 import { useIptvStore } from "@/store/use-iptv-store";
 import { useUpdateProfile } from "@/hooks/use-profiles";
+import { type EpgData, getNowNext, getProgressPercent, formatTime, resolveChannelId } from "@/lib/epg-parser";
 import { cn } from "@/lib/utils";
 
 interface MediaCardProps {
   item: PlaylistItem;
   isFavorite: boolean;
+  epgData?: EpgData | null;
 }
 
-export function MediaCard({ item, isFavorite }: MediaCardProps) {
+export function MediaCard({ item, isFavorite, epgData }: MediaCardProps) {
   const setPlayingItem = useIptvStore((state) => state.setPlayingItem);
   const profile = useIptvStore((state) => state.selectedProfile);
   const updateProfile = useUpdateProfile();
@@ -33,6 +35,10 @@ export function MediaCard({ item, isFavorite }: MediaCardProps) {
 
   const initials = item.name.replace(/^\W+/, "").substring(0, 2).toUpperCase() || "??";
 
+  const channelId = epgData ? resolveChannelId(epgData, item.tvgId, item.tvgName, item.name) : "";
+  const { now } = channelId ? getNowNext(epgData!, channelId) : { now: null };
+  const progress = getProgressPercent(now);
+
   return (
     <div
       onClick={() => setPlayingItem(item)}
@@ -46,11 +52,8 @@ export function MediaCard({ item, isFavorite }: MediaCardProps) {
             referrerPolicy="no-referrer"
             className="w-full h-full object-contain p-3 opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
             onError={() => {
-              if (!logoFailed) {
-                setLogoFailed(true);
-              } else {
-                setLogoProxyFailed(true);
-              }
+              if (!logoFailed) setLogoFailed(true);
+              else setLogoProxyFailed(true);
             }}
           />
         ) : (
@@ -86,10 +89,28 @@ export function MediaCard({ item, isFavorite }: MediaCardProps) {
         </button>
       </div>
 
-      <div className="px-3 py-2.5 bg-card border-t border-border/50">
+      <div className="px-3 pt-2.5 pb-1.5 bg-card border-t border-border/50 flex flex-col gap-1">
         <h3 className="text-white font-medium text-[11px] line-clamp-1 uppercase tracking-tight group-hover:text-primary transition-colors leading-tight">
           {item.name}
         </h3>
+
+        {now && (
+          <div className="space-y-1">
+            <p className="text-[9px] text-slate-400 line-clamp-1 leading-tight">{now.title}</p>
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-2.5 h-2.5 text-slate-600 shrink-0" />
+              <span className="text-[8px] text-slate-600 tabular-nums">
+                {formatTime(now.start)}–{formatTime(now.stop)}
+              </span>
+            </div>
+            <div className="h-px w-full bg-border overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-1000"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,8 @@ export interface PlaylistItem {
   group: string;
   url: string;
   type: 'live' | 'movies' | 'series';
+  tvgId: string;
+  tvgName: string;
 }
 
 function stringToId(str: string): string {
@@ -57,6 +59,8 @@ export function parseM3U(content: string): PlaylistItem[] {
       const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
       const groupMatch = line.match(/group-title="([^"]*)"/i);
       const titleMatch = line.match(/,(.*)$/);
+      const tvgIdMatch = line.match(/tvg-id="([^"]*)"/i);
+      const tvgNameMatch = line.match(/tvg-name="([^"]*)"/i);
 
       const group = groupMatch ? groupMatch[1].trim() : 'Uncategorized';
       let name = titleMatch ? titleMatch[1].trim() : 'Unknown';
@@ -67,6 +71,8 @@ export function parseM3U(content: string): PlaylistItem[] {
         name,
         group,
         logo: logoMatch ? logoMatch[1] : '',
+        tvgId: tvgIdMatch ? tvgIdMatch[1].trim() : '',
+        tvgName: tvgNameMatch ? tvgNameMatch[1].trim() : '',
       };
     } else if (line && !line.startsWith('#')) {
       currentItem.url = line;
@@ -91,7 +97,9 @@ export function parseM3U(content: string): PlaylistItem[] {
           url: line,
           group: 'Imported',
           type: detectTypeFromUrl(line) ?? 'live',
-          logo: ''
+          logo: '',
+          tvgId: '',
+          tvgName: '',
         });
       }
     }

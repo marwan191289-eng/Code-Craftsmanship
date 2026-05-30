@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useIptvStore } from "@/store/use-iptv-store";
 import { useIptvPlaylist } from "@/hooks/use-iptv-playlist";
+import { useEpg } from "@/hooks/use-epg";
 import { Sidebar } from "@/components/iptv/sidebar";
 import { MediaCard } from "@/components/iptv/media-card";
 import { PlayerOverlay } from "@/components/iptv/player";
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const [displayCount, setDisplayCount] = useState(100);
 
   const { data: allItems = [], isLoading, error } = useIptvPlaylist(profile);
+  const { epgData } = useEpg(profile);
 
   const filteredItems = useMemo(() => {
     let filtered = allItems;
@@ -65,13 +67,10 @@ export default function Dashboard() {
   );
 
   const tabLabel =
-    currentTab === "live"
-      ? "Live TV"
-      : currentTab === "movies"
-      ? "Movies"
-      : currentTab === "series"
-      ? "Series"
-      : "Favorites";
+    currentTab === "live" ? "Live TV"
+    : currentTab === "movies" ? "Movies"
+    : currentTab === "series" ? "Series"
+    : "Favorites";
 
   const toggleDirectMode = () => {
     setDirectMode(!directMode);
@@ -93,6 +92,11 @@ export default function Dashboard() {
                 {filteredItems.length.toLocaleString()}
               </span>
             )}
+            {epgData && currentTab === "live" && (
+              <span className="text-[8px] text-green-400 uppercase tracking-widest border border-green-500/20 bg-green-900/10 px-2 py-0.5">
+                EPG Active
+              </span>
+            )}
           </div>
 
           <div className="relative flex-1 max-w-lg ml-auto">
@@ -110,11 +114,7 @@ export default function Dashboard() {
 
           <button
             onClick={toggleDirectMode}
-            title={
-              directMode
-                ? "VPN Mode active — browser fetches directly"
-                : "Server Proxy mode — click to enable VPN Mode"
-            }
+            title={directMode ? "VPN Mode active" : "Server Proxy mode"}
             className={cn(
               "flex items-center gap-2 px-3 h-10 border text-[9px] uppercase tracking-widest font-medium transition-all duration-300 shrink-0",
               directMode
@@ -123,22 +123,14 @@ export default function Dashboard() {
             )}
           >
             {directMode ? (
-              <>
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">VPN</span>
-              </>
+              <><ShieldCheck className="w-3.5 h-3.5" /><span className="hidden sm:inline">VPN</span></>
             ) : (
-              <>
-                <Globe className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Proxy</span>
-              </>
+              <><Globe className="w-3.5 h-3.5" /><span className="hidden sm:inline">Proxy</span></>
             )}
           </button>
 
           <button
-            onClick={() =>
-              queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })
-            }
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })}
             className="p-2.5 border border-border hover:border-primary text-slate-600 hover:text-primary transition-all shrink-0"
             title="Refresh playlist"
           >
@@ -150,8 +142,7 @@ export default function Dashboard() {
           <div className="bg-green-900/10 border-b border-green-500/20 px-6 py-2 flex items-center gap-2">
             <ShieldCheck className="w-3 h-3 text-green-400 shrink-0" />
             <p className="text-[9px] text-green-400 uppercase tracking-widest">
-              VPN Direct Mode — playlist &amp; streams fetched directly from your browser. Make sure
-              your VPN is active.
+              VPN Direct Mode — playlist &amp; streams fetched directly from your browser.
             </p>
           </div>
         )}
@@ -160,52 +151,20 @@ export default function Dashboard() {
           {isLoading ? (
             <div className="h-full flex flex-col items-center justify-center gap-4">
               <Loader2 className="w-8 h-8 animate-spin text-primary opacity-40" />
-              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-600">
-                Loading {tabLabel}...
-              </p>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-slate-600">Loading {tabLabel}...</p>
             </div>
           ) : error ? (
             <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto gap-4">
               <div className="w-16 h-16 border border-red-500/20 flex items-center justify-center">
                 <WifiOff className="w-7 h-7 text-red-500/60" />
               </div>
-              <h2 className="text-xl font-medium text-white font-display uppercase tracking-tight">
-                Connection Failed
-              </h2>
+              <h2 className="text-xl font-medium text-white font-display uppercase tracking-tight">Connection Failed</h2>
               <p className="text-slate-500 text-xs leading-relaxed border border-border bg-card p-4">
                 {(error as Error).message}
               </p>
-              {!directMode ? (
-                <div className="border border-green-500/20 bg-green-900/10 p-4 text-left max-w-sm">
-                  <p className="text-green-400 text-[9px] uppercase tracking-widest mb-2 font-medium">
-                    Try VPN Mode
-                  </p>
-                  <p className="text-slate-500 text-[9px] leading-relaxed mb-3">
-                    If your server requires a VPN, enable VPN Mode so your browser fetches directly
-                    using your local VPN connection.
-                  </p>
-                  <button
-                    onClick={toggleDirectMode}
-                    className="flex items-center gap-2 px-4 py-2 border border-green-500/40 hover:border-green-500 text-green-400 text-[9px] uppercase tracking-widest transition-all"
-                  >
-                    <ShieldCheck className="w-3 h-3" /> Enable VPN Mode
-                  </button>
-                </div>
-              ) : (
-                <div className="border border-amber-500/20 bg-amber-900/10 p-4 text-left max-w-sm">
-                  <p className="text-amber-400 text-[9px] uppercase tracking-widest mb-2 font-medium">
-                    VPN Mode Active
-                  </p>
-                  <p className="text-slate-500 text-[9px] leading-relaxed">
-                    Make sure your VPN is connected and try refreshing.
-                  </p>
-                </div>
-              )}
               <div className="flex gap-3">
                 <button
-                  onClick={() =>
-                    queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })
-                  }
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })}
                   className="px-6 py-2.5 border border-border hover:border-primary text-slate-400 hover:text-white text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"
                 >
                   <RefreshCw className="w-3 h-3" /> Retry
@@ -215,30 +174,14 @@ export default function Dashboard() {
           ) : filteredItems.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center gap-4">
               <div className="w-16 h-16 border border-border flex items-center justify-center">
-                {allItems.length === 0 ? (
-                  <PlaySquare className="w-6 h-6 text-slate-700" />
-                ) : (
-                  <Search className="w-6 h-6 text-slate-700" />
-                )}
+                {allItems.length === 0 ? <PlaySquare className="w-6 h-6 text-slate-700" /> : <Search className="w-6 h-6 text-slate-700" />}
               </div>
               <h2 className="text-lg font-medium text-white font-display uppercase tracking-tight">
                 {allItems.length === 0 ? "No content loaded" : "No results"}
               </h2>
               <p className="text-slate-600 text-[10px] uppercase tracking-[0.15em] max-w-xs">
-                {searchQuery
-                  ? "Try a different search term"
-                  : allItems.length === 0
-                  ? "The playlist loaded but contains no items"
-                  : `No ${tabLabel} found in this playlist`}
+                {searchQuery ? "Try a different search term" : allItems.length === 0 ? "The playlist loaded but contains no items" : `No ${tabLabel} found`}
               </p>
-              {allItems.length > 0 && !searchQuery && (
-                <div className="text-[9px] text-slate-700 border border-border bg-card p-4 max-w-xs text-left space-y-1">
-                  <p className="uppercase tracking-widest text-slate-500 mb-2">Content found:</p>
-                  <p>• Live: {counts.live.toLocaleString()}</p>
-                  <p>• Movies: {counts.movies.toLocaleString()}</p>
-                  <p>• Series: {counts.series.toLocaleString()}</p>
-                </div>
-              )}
             </div>
           ) : (
             <motion.div
@@ -252,6 +195,7 @@ export default function Dashboard() {
                   key={item.id}
                   item={item}
                   isFavorite={(profile?.favorites || []).includes(item.id)}
+                  epgData={currentTab === "live" ? epgData : null}
                 />
               ))}
 
@@ -273,7 +217,7 @@ export default function Dashboard() {
         </div>
       </main>
 
-      <PlayerOverlay />
+      <PlayerOverlay epgData={epgData} />
     </div>
   );
 }
