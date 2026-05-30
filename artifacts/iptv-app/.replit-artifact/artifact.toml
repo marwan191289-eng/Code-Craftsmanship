@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "MARWAN IPTV"
+version = "1.0.0"
+id = "artifacts/iptv-app"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21038
+
+[services.development]
+run = "pnpm --filter @workspace/iptv-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/iptv-app", "run", "build" ]
+publicDir = "artifacts/iptv-app/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21038"
+BASE_PATH = "/"
