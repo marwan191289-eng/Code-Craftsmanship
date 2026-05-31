@@ -15,6 +15,7 @@ export interface EpgChannel {
 export interface EpgData {
   channels: Map<string, EpgChannel>;
   programs: Map<string, EpgProgram[]>;
+  nameIndex: Map<string, string>;
   fetchedAt: number;
 }
 
@@ -46,6 +47,7 @@ function parseEpgDate(dateStr: string): Date {
 export function parseEpgXml(xml: string): EpgData {
   const channels = new Map<string, EpgChannel>();
   const programs = new Map<string, EpgProgram[]>();
+  const nameIndex = new Map<string, string>();
 
   try {
     const parser = new DOMParser();
@@ -56,11 +58,9 @@ export function parseEpgXml(xml: string): EpgData {
       if (!id) return;
       const nameEl = ch.querySelector('display-name');
       const iconEl = ch.querySelector('icon');
-      channels.set(id, {
-        id,
-        name: nameEl?.textContent?.trim() || id,
-        icon: iconEl?.getAttribute('src') || '',
-      });
+      const name = nameEl?.textContent?.trim() || id;
+      channels.set(id, { id, name, icon: iconEl?.getAttribute('src') || '' });
+      nameIndex.set(name.toLowerCase(), id);
     });
 
     doc.querySelectorAll('programme').forEach((prog) => {
@@ -77,11 +77,28 @@ export function parseEpgXml(xml: string): EpgData {
       if (!programs.has(channelId)) programs.set(channelId, []);
       programs.get(channelId)!.push({ channelId, title, description: desc, start, stop });
     });
+
+    for (const [, progs] of programs) {
+      progs.sort((a, b) => a.start.getTime() - b.start.getTime());
+    }
   } catch {
     // silent
   }
 
-  return { channels, programs, fetchedAt: Date.now() };
+  return { channels, programs, nameIndex, fetchedAt: Date.now() };
+}
+
+function binarySearchNow(progs: EpgProgram[], now: number): number {
+  let lo = 0, hi = progs.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    const s = progs[mid].start.getTime();
+    const e = progs[mid].stop.getTime();
+    if (s <= now && e > now) return mid;
+    if (e <= now) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  return -1;
 }
 
 export function getNowNext(
@@ -94,19 +111,11 @@ export function getNowNext(
   if (!progs || progs.length === 0) return { now: null, next: null };
 
   const now = Date.now();
-  const sorted = [...progs].sort((a, b) => a.start.getTime() - b.start.getTime());
-
-  let nowIdx = -1;
-  for (let i = 0; i < sorted.length; i++) {
-    if (sorted[i].start.getTime() <= now && sorted[i].stop.getTime() > now) {
-      nowIdx = i;
-      break;
-    }
-  }
+  const idx = binarySearchNow(progs, now);
 
   return {
-    now: nowIdx >= 0 ? sorted[nowIdx] : null,
-    next: nowIdx >= 0 && nowIdx + 1 < sorted.length ? sorted[nowIdx + 1] : null,
+    now: idx >= 0 ? progs[idx] : null,
+    next: idx >= 0 && idx + 1 < progs.length ? progs[idx + 1] : null,
   };
 }
 
@@ -135,15 +144,11 @@ export function resolveChannelId(
   if (tvgName && epgData.programs.has(tvgName)) return tvgName;
 
   const lowerName = channelName.toLowerCase();
-  for (const [id] of epgData.channels) {
-    const ch = epgData.channels.get(id);
-    if (ch?.name.toLowerCase() === lowerName) return id;
-  }
-  for (const [id] of epgData.channels) {
-    const ch = epgData.channels.get(id);
-    if (ch && (ch.name.toLowerCase().includes(lowerName) || lowerName.includes(ch.name.toLowerCase()))) {
-      return id;
-    }
+  const exact = epgData.nameIndex.get(lowerName);
+  if (exact) return exact;
+
+  for (const [name, id] of epgData.nameIndex) {
+    if (name.includes(lowerName) || lowerName.includes(name)) return id;
   }
   return '';
 }

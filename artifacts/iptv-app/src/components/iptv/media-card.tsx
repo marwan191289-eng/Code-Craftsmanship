@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Heart, Play, Clock } from "lucide-react";
 import { type PlaylistItem } from "@/lib/m3u-parser";
 import { useIptvStore } from "@/store/use-iptv-store";
@@ -10,9 +10,10 @@ interface MediaCardProps {
   item: PlaylistItem;
   isFavorite: boolean;
   epgData?: EpgData | null;
+  preResolvedChannelId?: string;
 }
 
-export function MediaCard({ item, isFavorite, epgData }: MediaCardProps) {
+export const MediaCard = memo(function MediaCard({ item, isFavorite, epgData, preResolvedChannelId }: MediaCardProps) {
   const setPlayingItem = useIptvStore((state) => state.setPlayingItem);
   const profile = useIptvStore((state) => state.selectedProfile);
   const updateProfile = useUpdateProfile();
@@ -35,7 +36,9 @@ export function MediaCard({ item, isFavorite, epgData }: MediaCardProps) {
 
   const initials = item.name.replace(/^\W+/, "").substring(0, 2).toUpperCase() || "??";
 
-  const channelId = epgData ? resolveChannelId(epgData, item.tvgId, item.tvgName, item.name) : "";
+  const channelId = preResolvedChannelId !== undefined
+    ? preResolvedChannelId
+    : (epgData ? resolveChannelId(epgData, item.tvgId, item.tvgName, item.name) : "");
   const { now } = channelId ? getNowNext(epgData!, channelId) : { now: null };
   const progress = getProgressPercent(now);
 
@@ -50,6 +53,8 @@ export function MediaCard({ item, isFavorite, epgData }: MediaCardProps) {
             src={logoSrc || ""}
             alt={item.name}
             referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-contain p-3 opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-500"
             onError={() => {
               if (!logoFailed) setLogoFailed(true);
@@ -114,4 +119,4 @@ export function MediaCard({ item, isFavorite, epgData }: MediaCardProps) {
       </div>
     </div>
   );
-}
+});

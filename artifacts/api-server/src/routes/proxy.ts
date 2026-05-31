@@ -2,13 +2,21 @@ import { Router } from "express";
 
 const router = Router();
 
-const epgCache = new Map<string, { data: Buffer; contentType: string; fetchedAt: number }>();
-const EPG_TTL = 60 * 60 * 1000;
+interface CacheEntry { data: Buffer; contentType: string; fetchedAt: number }
 
-const HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/110.0.0.0 Safari/537.36",
-  Accept: "*/*",
-  Connection: "keep-alive",
+const epgCache = new Map<string, CacheEntry>();
+const playlistCache = new Map<string, CacheEntry>();
+const manifestCache = new Map<string, CacheEntry>();
+
+const EPG_TTL       = 60 * 60 * 1000;
+const PLAYLIST_TTL  = 5  * 60 * 1000;
+const MANIFEST_TTL  = 20 * 1000;
+
+const BASE_HEADERS: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+  "Accept": "*/*",
+  "Accept-Encoding": "gzip, deflate",
+  "Connection": "keep-alive",
 };
 
 async function fetchRemote(url: string, options: RequestInit = {}, timeoutMs = 30000): Promise<Response> {
@@ -19,7 +27,7 @@ async function fetchRemote(url: string, options: RequestInit = {}, timeoutMs = 3
       ...options,
       signal: controller.signal,
       headers: {
-        ...HEADERS,
+        ...BASE_HEADERS,
         ...(options.headers as Record<string, string> || {}),
       },
     });
@@ -28,33 +36,43 @@ async function fetchRemote(url: string, options: RequestInit = {}, timeoutMs = 3
   }
 }
 
+function getCached(cache: Map<string, CacheEntry>, key: string, ttl: number): CacheEntry | null {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.fetchedAt < ttl) return hit;
+  return null;
+}
+
+function sendCached(res: import("express").Response, entry: CacheEntry, cached: boolean): void {
+  res.setHeader("Content-Type", entry.contentType);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("X-Cache", cached ? "HIT" : "MISS");
+  res.setHeader("Cache-Control", "no-cache");
+  res.status(200).send(entry.data);
+}
+
 function rewriteManifestUrls(manifest: string, baseUrl: string): string {
   const lines = manifest.split("\n");
-  const rewritten: string[] = [];
-
+  const out: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) {
-      rewritten.push(line);
+      out.push(line);
       continue;
     }
-
     let absUrl: string;
     try {
       absUrl = new URL(trimmed, baseUrl).href;
     } catch {
-      rewritten.push(line);
+      out.push(line);
       continue;
     }
-
     if (absUrl.includes("/api/proxy")) {
-      rewritten.push(line);
+      out.push(line);
     } else {
-      rewritten.push(line.replace(trimmed, `/api/proxy?url=${encodeURIComponent(absUrl)}`));
+      out.push(line.replace(trimmed, `/api/proxy?url=${encodeURIComponent(absUrl)}`));
     }
   }
-
-  return rewritten.join("\n");
+  return out.join("\n");
 }
 
 router.post("/upload-m3u", async (_req, res) => {
@@ -89,15 +107,8 @@ router.get("/epg", async (req, res) => {
     return;
   }
 
-  const cached = epgCache.get(targetUrl);
-  if (cached && Date.now() - cached.fetchedAt < EPG_TTL) {
-    res.setHeader("Content-Type", cached.contentType);
-    res.setHeader("X-EPG-Cached", "true");
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.status(200).send(cached.data);
-    return;
-  }
+  const cached = getCached(epgCache, targetUrl, EPG_TTL);
+  if (cached) { sendCached(res, cached, true); return; }
 
   try {
     let response: Response;
@@ -118,16 +129,11 @@ router.get("/epg", async (req, res) => {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const data = Buffer.from(arrayBuffer);
     const contentType = response.headers.get("content-type") || "application/xml";
-
-    epgCache.set(targetUrl, { data: buffer, contentType, fetchedAt: Date.now() });
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("X-EPG-Cached", "false");
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.status(200).send(buffer);
+    const entry: CacheEntry = { data, contentType, fetchedAt: Date.now() };
+    epgCache.set(targetUrl, entry);
+    sendCached(res, entry, false);
   } catch (error: any) {
     res.status(500).json({ message: "EPG proxy failed: " + error.message });
   }
@@ -141,8 +147,32 @@ router.get("/proxy", async (req, res) => {
   }
 
   const lowerUrl = targetUrl.toLowerCase();
-  const isManifest = lowerUrl.includes(".m3u") || lowerUrl.includes(".m3u8") || lowerUrl.includes("playlist");
-  const isVideo = lowerUrl.includes(".ts") || lowerUrl.includes(".aac") || lowerUrl.includes(".ac3") || lowerUrl.includes(".mp4") || lowerUrl.includes(".mkv") || lowerUrl.includes(".avi") || lowerUrl.includes(".flv") || lowerUrl.includes(".webm") || lowerUrl.includes(".m4v");
+
+  const isPlaylist =
+    lowerUrl.includes("get.php") ||
+    lowerUrl.includes("type=m3u") ||
+    (lowerUrl.endsWith(".m3u") && !lowerUrl.includes(".m3u8"));
+
+  const isManifest =
+    !isPlaylist &&
+    (lowerUrl.includes(".m3u8") || lowerUrl.includes("playlist.m3u8") || lowerUrl.includes("index.m3u8"));
+
+  const isVideo =
+    lowerUrl.endsWith(".ts") || lowerUrl.includes(".ts?") ||
+    lowerUrl.endsWith(".aac") || lowerUrl.endsWith(".ac3") ||
+    lowerUrl.endsWith(".mp4") || lowerUrl.endsWith(".mkv") ||
+    lowerUrl.endsWith(".avi") || lowerUrl.endsWith(".flv") ||
+    lowerUrl.endsWith(".webm") || lowerUrl.endsWith(".m4v");
+
+  if (isPlaylist) {
+    const cached = getCached(playlistCache, targetUrl, PLAYLIST_TTL);
+    if (cached) { sendCached(res, cached, true); return; }
+  }
+
+  if (isManifest) {
+    const cached = getCached(manifestCache, targetUrl, MANIFEST_TTL);
+    if (cached) { sendCached(res, cached, true); return; }
+  }
 
   try {
     const fetchOptions: RequestInit = {};
@@ -153,7 +183,8 @@ router.get("/proxy", async (req, res) => {
 
     let response: Response;
     try {
-      response = await fetchRemote(targetUrl, fetchOptions, isManifest ? 30000 : 60000);
+      const timeout = isVideo ? 60000 : isPlaylist ? 45000 : 30000;
+      response = await fetchRemote(targetUrl, fetchOptions, timeout);
     } catch (fetchErr: any) {
       if (fetchErr.name === "AbortError") {
         res.status(504).json({ message: "Request timed out." });
@@ -180,29 +211,36 @@ router.get("/proxy", async (req, res) => {
     res.setHeader("Access-Control-Expose-Headers", "*");
 
     const acceptRanges = response.headers.get("accept-ranges");
-    if (acceptRanges) {
-      res.setHeader("Accept-Ranges", acceptRanges);
-    }
+    if (acceptRanges) res.setHeader("Accept-Ranges", acceptRanges);
 
     const contentRange = response.headers.get("content-range");
-    if (contentRange) {
-      res.setHeader("Content-Range", contentRange);
+    if (contentRange) res.setHeader("Content-Range", contentRange);
+
+    if (isPlaylist) {
+      const text = await response.text();
+      const data = Buffer.from(text, "utf-8");
+      const ct = "application/x-mpegurl";
+      const entry: CacheEntry = { data, contentType: ct, fetchedAt: Date.now() };
+      playlistCache.set(targetUrl, entry);
+      sendCached(res, entry, false);
+      return;
     }
 
     if (isManifest) {
-      contentType = lowerUrl.includes(".m3u8") ? "application/vnd.apple.mpegurl" : "application/x-mpegurl";
+      contentType = "application/vnd.apple.mpegurl";
       const text = await response.text();
       const rewritten = rewriteManifestUrls(text, targetUrl);
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-      res.status(200).send(rewritten);
+      const data = Buffer.from(rewritten, "utf-8");
+      const entry: CacheEntry = { data, contentType, fetchedAt: Date.now() };
+      manifestCache.set(targetUrl, entry);
+      sendCached(res, entry, false);
       return;
     }
 
     if (isVideo) {
       contentType = lowerUrl.includes(".ts") ? "video/mp2t" : contentType;
       res.setHeader("Content-Type", contentType);
-      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Transfer-Encoding", "chunked");
       res.status(response.status);
 
@@ -215,7 +253,7 @@ router.get("/proxy", async (req, res) => {
             res.write(Buffer.from(value));
           }
           res.end();
-        } catch (err) {
+        } catch {
           res.destroy();
         }
         return;
@@ -230,6 +268,7 @@ router.get("/proxy", async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", buffer.length);
+    res.setHeader("Cache-Control", "no-cache");
     res.status(200).send(buffer);
   } catch (error: any) {
     res.status(500).json({ message: "Proxy request failed: " + error.message });

@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useIptvStore } from "@/store/use-iptv-store";
 import { useIptvPlaylist } from "@/hooks/use-iptv-playlist";
 import { useEpg } from "@/hooks/use-epg";
+import { useDebounce } from "@/hooks/use-debounce";
 import { Sidebar } from "@/components/iptv/sidebar";
 import { MediaCard } from "@/components/iptv/media-card";
 import { PlayerOverlay } from "@/components/iptv/player";
@@ -10,6 +11,9 @@ import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { resolveChannelId } from "@/lib/epg-parser";
+
+const PAGE_SIZE = 120;
 
 export default function Dashboard() {
   const profile = useIptvStore((state) => state.selectedProfile);
@@ -20,23 +24,41 @@ export default function Dashboard() {
   const setDirectMode = useIptvStore((state) => state.setDirectMode);
   const queryClient = useQueryClient();
 
-  const [displayCount, setDisplayCount] = useState(100);
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
+
+  const debouncedSearch = useDebounce(searchQuery, 250);
+
+  useEffect(() => {
+    setDisplayCount(PAGE_SIZE);
+  }, [currentTab, debouncedSearch]);
 
   const { data: allItems = [], isLoading, error } = useIptvPlaylist(profile);
   const { epgData } = useEpg(profile);
 
+  const channelIdCache = useMemo(() => {
+    if (!epgData || !allItems.length) return new Map<string, string>();
+    const cache = new Map<string, string>();
+    for (const item of allItems) {
+      if (item.type === 'live') {
+        cache.set(item.id, resolveChannelId(epgData, item.tvgId, item.tvgName, item.name));
+      }
+    }
+    return cache;
+  }, [epgData, allItems]);
+
   const filteredItems = useMemo(() => {
-    let filtered = allItems;
+    const favs = profile?.favorites || [];
+    let filtered: typeof allItems;
 
     if (currentTab === "favorites") {
-      const favs = profile?.favorites || [];
-      filtered = filtered.filter((item) => favs.includes(item.id));
+      const favSet = new Set(favs);
+      filtered = allItems.filter((item) => favSet.has(item.id));
     } else {
-      filtered = filtered.filter((item) => item.type === currentTab);
+      filtered = allItems.filter((item) => item.type === currentTab);
     }
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       filtered = filtered.filter(
         (item) =>
           item.name.toLowerCase().includes(q) ||
@@ -44,27 +66,26 @@ export default function Dashboard() {
       );
     }
 
-    filtered = [...filtered].sort((a, b) => {
-      const gA = (a.group || "").toLowerCase();
-      const gB = (b.group || "").toLowerCase();
+    return filtered.slice().sort((a, b) => {
+      const gA = a.group || "";
+      const gB = b.group || "";
       if (gA < gB) return -1;
       if (gA > gB) return 1;
-      return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
     });
-
-    return filtered;
-  }, [allItems, currentTab, searchQuery, profile?.favorites]);
+  }, [allItems, currentTab, debouncedSearch, profile?.favorites]);
 
   const visibleItems = filteredItems.slice(0, displayCount);
 
-  const counts = useMemo(
-    () => ({
-      live: allItems.filter((i) => i.type === "live").length,
-      movies: allItems.filter((i) => i.type === "movies").length,
-      series: allItems.filter((i) => i.type === "series").length,
-    }),
-    [allItems]
-  );
+  const counts = useMemo(() => {
+    let live = 0, movies = 0, series = 0;
+    for (const i of allItems) {
+      if (i.type === 'live') live++;
+      else if (i.type === 'movies') movies++;
+      else if (i.type === 'series') series++;
+    }
+    return { live, movies, series };
+  }, [allItems]);
 
   const tabLabel =
     currentTab === "live" ? "Live TV"
@@ -72,10 +93,22 @@ export default function Dashboard() {
     : currentTab === "series" ? "Series"
     : "Favorites";
 
-  const toggleDirectMode = () => {
+  const toggleDirectMode = useCallback(() => {
     setDirectMode(!directMode);
     queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] });
-  };
+  }, [directMode, setDirectMode, queryClient, profile?.id]);
+
+  const handleRefresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] });
+  }, [queryClient, profile?.id]);
+
+  const handleLoadMore = useCallback(() => {
+    setDisplayCount((p) => p + PAGE_SIZE);
+  }, []);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+  }, [setSearchQuery]);
 
   return (
     <div className="flex h-screen bg-background overflow-hidden font-sans">
@@ -105,10 +138,7 @@ export default function Dashboard() {
               placeholder={`Search ${tabLabel}...`}
               className="w-full pl-10 bg-card border-border text-white rounded-none h-10 focus-visible:ring-primary placeholder:text-slate-600 text-sm"
               value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setDisplayCount(100);
-              }}
+              onChange={handleSearchChange}
             />
           </div>
 
@@ -130,7 +160,7 @@ export default function Dashboard() {
           </button>
 
           <button
-            onClick={() => queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })}
+            onClick={handleRefresh}
             className="p-2.5 border border-border hover:border-primary text-slate-600 hover:text-primary transition-all shrink-0"
             title="Refresh playlist"
           >
@@ -164,7 +194,7 @@ export default function Dashboard() {
               </p>
               <div className="flex gap-3">
                 <button
-                  onClick={() => queryClient.invalidateQueries({ queryKey: ["playlist", profile?.id] })}
+                  onClick={handleRefresh}
                   className="px-6 py-2.5 border border-border hover:border-primary text-slate-400 hover:text-white text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"
                 >
                   <RefreshCw className="w-3 h-3" /> Retry
@@ -187,7 +217,7 @@ export default function Dashboard() {
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4 }}
+              transition={{ duration: 0.3 }}
               className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4 pb-20"
             >
               {visibleItems.map((item) => (
@@ -196,6 +226,7 @@ export default function Dashboard() {
                   item={item}
                   isFavorite={(profile?.favorites || []).includes(item.id)}
                   epgData={currentTab === "live" ? epgData : null}
+                  preResolvedChannelId={channelIdCache.get(item.id)}
                 />
               ))}
 
@@ -205,7 +236,7 @@ export default function Dashboard() {
                     Showing {displayCount} of {filteredItems.length.toLocaleString()}
                   </p>
                   <button
-                    onClick={() => setDisplayCount((p) => p + 200)}
+                    onClick={handleLoadMore}
                     className="px-10 py-3 border border-border hover:border-primary text-white text-[10px] font-bold uppercase tracking-[0.25em] transition-all duration-300 hover:bg-primary/5"
                   >
                     Load More
