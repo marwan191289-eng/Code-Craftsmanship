@@ -1,23 +1,131 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ar" dir="ltr">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <title>MARWAN IPTV</title>
-    <meta name="description" content="MARWAN IPTV — built on Replit. Update this description to reflect the app." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <title>MARWAN IPTV — بث مباشر، أفلام ومسلسلات</title>
+    <meta name="description" content="MARWAN IPTV — منصة بث احترافية للقنوات المباشرة والأفلام والمسلسلات. ادعم Xtream Codes وقوائم M3U من أي سيرفر حول العالم." />
+    <meta name="keywords" content="IPTV, بث مباشر, قنوات, أفلام, مسلسلات, Xtream, M3U, MARWAN IPTV" />
+    <meta name="author" content="MARWAN IPTV" />
     <meta name="robots" content="index, follow" />
-    <meta property="og:title" content="MARWAN IPTV" />
-    <meta property="og:description" content="MARWAN IPTV — built on Replit. Update this description to reflect the app." />
+    <meta name="theme-color" content="#c8930a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MARWAN IPTV" />
+    <meta name="application-name" content="MARWAN IPTV" />
+    <meta name="msapplication-TileColor" content="#0a0a0f" />
+    <meta name="format-detection" content="telephone=no" />
+
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MARWAN IPTV" />
+    <meta property="og:title" content="MARWAN IPTV — بث مباشر، أفلام ومسلسلات" />
+    <meta property="og:description" content="منصة بث احترافية للقنوات المباشرة والأفلام والمسلسلات. ادعم Xtream Codes وقوائم M3U من أي سيرفر حول العالم." />
+    <meta property="og:image" content="/opengraph.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MARWAN IPTV — Premium Streaming" />
+    <meta property="og:locale" content="ar_AR" />
+
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="MARWAN IPTV" />
-    <meta name="twitter:description" content="MARWAN IPTV — built on Replit. Update this description to reflect the app." />
+    <meta name="twitter:title" content="MARWAN IPTV — بث مباشر، أفلام ومسلسلات" />
+    <meta name="twitter:description" content="منصة بث احترافية للقنوات المباشرة والأفلام والمسلسلات." />
+    <meta name="twitter:image" content="/opengraph.jpg" />
+    <meta name="twitter:image:alt" content="MARWAN IPTV" />
+
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="canonical" href="/" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #0a0a0f;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 20px;
+        transition: opacity 0.5s ease, visibility 0.5s ease;
+      }
+      #splash.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      #splash svg {
+        width: 72px;
+        height: 72px;
+        animation: splash-pulse 1.4s ease-in-out infinite;
+      }
+      #splash-title {
+        font-family: 'Outfit', sans-serif;
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: 0.25em;
+        color: #fff;
+        text-transform: uppercase;
+      }
+      #splash-sub {
+        font-family: 'Outfit', sans-serif;
+        font-size: 10px;
+        letter-spacing: 0.35em;
+        color: #c8930a;
+        text-transform: uppercase;
+      }
+      #splash-bar {
+        width: 120px;
+        height: 2px;
+        background: #1a1a25;
+        border-radius: 2px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      #splash-progress {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(90deg, #c8930a, #f5c842);
+        border-radius: 2px;
+        animation: splash-load 1.8s ease-out forwards;
+      }
+      @keyframes splash-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.7; transform: scale(0.95); }
+      }
+      @keyframes splash-load {
+        0% { width: 0%; }
+        60% { width: 75%; }
+        90% { width: 92%; }
+        100% { width: 100%; }
+      }
+    </style>
   </head>
   <body>
+    <div id="splash" aria-hidden="true">
+      <svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="72" y="136" width="368" height="240" rx="16" fill="none" stroke="#C8930A" stroke-width="16"/>
+        <rect x="96" y="160" width="320" height="192" rx="8" fill="#0F0F18"/>
+        <polygon points="216,208 216,304 312,256" fill="#C8930A"/>
+        <line x1="168" y1="400" x2="344" y2="400" stroke="#C8930A" stroke-width="12" stroke-linecap="round"/>
+        <line x1="256" y1="376" x2="256" y2="400" stroke="#C8930A" stroke-width="12" stroke-linecap="round"/>
+        <circle cx="392" cy="160" r="14" fill="#C8930A"/>
+        <circle cx="432" cy="160" r="14" fill="#C8930A" fill-opacity="0.4"/>
+      </svg>
+      <div id="splash-title">MARWAN IPTV</div>
+      <div id="splash-sub">Ultra Pro Max Edition</div>
+      <div id="splash-bar"><div id="splash-progress"></div></div>
+    </div>
+
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
