@@ -18,5 +18,5 @@ export const profiles = pgTable("profiles", {
 
 export const insertProfileSchema = createInsertSchema(profiles).omit({ id: true });
 
-export type InsertProfile = z.infer<typeof insertProfileSchema>;
+export type InsertProfile = typeof profiles.$inferInsert;
 export type Profile = typeof profiles.$inferSelect;

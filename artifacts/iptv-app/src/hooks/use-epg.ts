@@ -18,7 +18,7 @@ export function useEpg(profile: Profile | null): { epgData: EpgData | null; isLo
     queryKey: ["epg", profile?.id],
     queryFn: async () => {
       if (!epgUrl) throw new Error("No EPG URL");
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(epgUrl)}`);
+      const res = await fetch(`/api/epg?url=${encodeURIComponent(epgUrl)}`);
       if (!res.ok) throw new Error("Failed to fetch EPG");
       const text = await res.text();
       if (!text.includes("<tv")) throw new Error("Invalid EPG");

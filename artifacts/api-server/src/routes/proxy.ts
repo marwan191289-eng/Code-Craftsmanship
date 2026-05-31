@@ -11,25 +11,62 @@ const HEADERS = {
   Connection: "keep-alive",
 };
 
-async function fetchRemote(url: string, timeoutMs = 120000): Promise<Response> {
+async function fetchRemote(url: string, options: RequestInit = {}, timeoutMs = 30000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { signal: controller.signal, headers: HEADERS });
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...HEADERS,
+        ...(options.headers as Record<string, string> || {}),
+      },
+    });
   } finally {
     clearTimeout(timer);
   }
 }
 
-router.post("/upload-m3u", async (req, res) => {
+function rewriteManifestUrls(manifest: string, baseUrl: string): string {
+  const lines = manifest.split("\n");
+  const rewritten: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      rewritten.push(line);
+      continue;
+    }
+
+    let absUrl: string;
+    try {
+      absUrl = new URL(trimmed, baseUrl).href;
+    } catch {
+      rewritten.push(line);
+      continue;
+    }
+
+    if (absUrl.includes("/api/proxy")) {
+      rewritten.push(line);
+    } else {
+      rewritten.push(line.replace(trimmed, `/api/proxy?url=${encodeURIComponent(absUrl)}`));
+    }
+  }
+
+  return rewritten.join("\n");
+}
+
+router.post("/upload-m3u", async (_req, res) => {
   try {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
+    _req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    _req.on("end", () => {
       try {
         const content = Buffer.concat(chunks).toString("utf-8").replace(/^\uFEFF/, "");
         if (!content.includes("#EXTINF") && !content.includes("#EXTM3U")) {
-          return res.status(400).json({ message: "File does not appear to be a valid M3U playlist" });
+          res.status(400).json({ message: "File does not appear to be a valid M3U playlist" });
+          return;
         }
         const entryCount = (content.match(/#EXTINF/g) || []).length;
         res.status(200).json({ success: true, content, entryCount });
@@ -37,7 +74,7 @@ router.post("/upload-m3u", async (req, res) => {
         res.status(500).json({ message: "Failed to process file: " + err.message });
       }
     });
-    req.on("error", (err) => {
+    _req.on("error", (err) => {
       res.status(500).json({ message: "Upload failed: " + err.message });
     });
   } catch (error: any) {
@@ -48,7 +85,8 @@ router.post("/upload-m3u", async (req, res) => {
 router.get("/epg", async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl || typeof targetUrl !== "string") {
-    return res.status(400).json({ message: "Missing url parameter" });
+    res.status(400).json({ message: "Missing url parameter" });
+    return;
   }
 
   const cached = epgCache.get(targetUrl);
@@ -56,22 +94,27 @@ router.get("/epg", async (req, res) => {
     res.setHeader("Content-Type", cached.contentType);
     res.setHeader("X-EPG-Cached", "true");
     res.setHeader("Access-Control-Allow-Origin", "*");
-    return res.status(200).send(cached.data);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.status(200).send(cached.data);
+    return;
   }
 
   try {
     let response: Response;
     try {
-      response = await fetchRemote(targetUrl, 120000);
+      response = await fetchRemote(targetUrl, {}, 30000);
     } catch (fetchErr: any) {
       if (fetchErr.name === "AbortError") {
-        return res.status(504).json({ message: "EPG request timed out" });
+        res.status(504).json({ message: "EPG request timed out" });
+        return;
       }
-      return res.status(502).json({ message: `Cannot reach EPG server: ${fetchErr.message}` });
+      res.status(502).json({ message: `Cannot reach EPG server: ${fetchErr.message}` });
+      return;
     }
 
     if (!response.ok) {
-      return res.status(502).json({ message: `EPG server responded with ${response.status}` });
+      res.status(502).json({ message: `EPG server responded with ${response.status}` });
+      return;
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -83,7 +126,8 @@ router.get("/epg", async (req, res) => {
     res.setHeader("Content-Type", contentType);
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("X-EPG-Cached", "false");
-    return res.status(200).send(buffer);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.status(200).send(buffer);
   } catch (error: any) {
     res.status(500).json({ message: "EPG proxy failed: " + error.message });
   }
@@ -92,50 +136,101 @@ router.get("/epg", async (req, res) => {
 router.get("/proxy", async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl || typeof targetUrl !== "string") {
-    return res.status(400).json({ message: "Missing or invalid URL parameter" });
+    res.status(400).json({ message: "Missing or invalid URL parameter" });
+    return;
   }
 
+  const lowerUrl = targetUrl.toLowerCase();
+  const isManifest = lowerUrl.includes(".m3u") || lowerUrl.includes(".m3u8") || lowerUrl.includes("playlist");
+  const isVideo = lowerUrl.includes(".ts") || lowerUrl.includes(".aac") || lowerUrl.includes(".ac3") || lowerUrl.includes(".mp4") || lowerUrl.includes(".mkv") || lowerUrl.includes(".avi") || lowerUrl.includes(".flv") || lowerUrl.includes(".webm") || lowerUrl.includes(".m4v");
+
   try {
+    const fetchOptions: RequestInit = {};
+    const rangeHeader = req.headers.range;
+    if (rangeHeader) {
+      fetchOptions.headers = { Range: rangeHeader };
+    }
+
     let response: Response;
     try {
-      response = await fetchRemote(targetUrl, 120000);
+      response = await fetchRemote(targetUrl, fetchOptions, isManifest ? 30000 : 60000);
     } catch (fetchErr: any) {
       if (fetchErr.name === "AbortError") {
-        return res.status(504).json({ message: "Request timed out." });
+        res.status(504).json({ message: "Request timed out." });
+        return;
       }
-      return res.status(502).json({
+      res.status(502).json({
         message: `Cannot reach server: ${fetchErr.cause?.code || fetchErr.message}.`,
       });
+      return;
     }
 
     if (!response.ok) {
-      return res.status(502).json({
+      res.status(502).json({
         message: `Server responded with error ${response.status}. Check your URL or credentials.`,
       });
+      return;
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    let contentType = response.headers.get("content-type") || "application/octet-stream";
 
-    let contentType = response.headers.get("content-type");
-    const lowerUrl = targetUrl.toLowerCase();
-    if (lowerUrl.includes("m3u8")) {
-      contentType = "application/vnd.apple.mpegurl";
-    } else if (lowerUrl.includes(".ts")) {
-      contentType = "video/mp2t";
-    } else if (lowerUrl.includes("m3u")) {
-      contentType = "application/x-mpegurl";
-    } else if (lowerUrl.includes("xmltv") || lowerUrl.includes("epg")) {
-      contentType = "application/xml";
-    }
-
-    res.setHeader("Content-Type", contentType || "application/octet-stream");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "*");
     res.setHeader("Access-Control-Expose-Headers", "*");
+
+    const acceptRanges = response.headers.get("accept-ranges");
+    if (acceptRanges) {
+      res.setHeader("Accept-Ranges", acceptRanges);
+    }
+
+    const contentRange = response.headers.get("content-range");
+    if (contentRange) {
+      res.setHeader("Content-Range", contentRange);
+    }
+
+    if (isManifest) {
+      contentType = lowerUrl.includes(".m3u8") ? "application/vnd.apple.mpegurl" : "application/x-mpegurl";
+      const text = await response.text();
+      const rewritten = rewriteManifestUrls(text, targetUrl);
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.status(200).send(rewritten);
+      return;
+    }
+
+    if (isVideo) {
+      contentType = lowerUrl.includes(".ts") ? "video/mp2t" : contentType;
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Transfer-Encoding", "chunked");
+      res.status(response.status);
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            res.write(Buffer.from(value));
+          }
+          res.end();
+        } catch (err) {
+          res.destroy();
+        }
+        return;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      res.setHeader("Content-Length", buffer.length);
+      res.end(buffer);
+      return;
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.setHeader("Content-Type", contentType);
     res.setHeader("Content-Length", buffer.length);
-    return res.status(200).send(buffer);
+    res.status(200).send(buffer);
   } catch (error: any) {
     res.status(500).json({ message: "Proxy request failed: " + error.message });
   }
